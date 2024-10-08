@@ -19,6 +19,7 @@ from unittest.mock import patch
 import pytest
 
 from astroid import (
+    Assign,
     Const,
     Slice,
     Uninferable,
@@ -1261,6 +1262,7 @@ class InferenceTest(resources.SysPathSetup, unittest.TestCase):
 
     def test_binary_op_or_union_type(self) -> None:
         """Binary or union is only defined for Python 3.10+."""
+        # pylint: disable = too-many-statements
         code = """
         class A: ...
 
@@ -4416,6 +4418,23 @@ class InferenceTest(resources.SysPathSetup, unittest.TestCase):
         inferred = list(node.inferred())
         assert [const.value for const in inferred] == [42, False]
 
+    def test_infer_property_setter(self) -> None:
+        node = extract_node(
+            """
+        class PropertyWithSetter:
+            @property
+            def host(self):
+                return self._host
+
+            @host.setter
+            def host(self, value: str):
+                self._host = value
+
+        PropertyWithSetter().host #@
+        """
+        )
+        assert not isinstance(next(node.infer()), Instance)
+
     def test_delayed_attributes_without_slots(self) -> None:
         ast_node = extract_node(
             """
@@ -6862,20 +6881,15 @@ def test_inferring_properties_multiple_time_does_not_mutate_locals() -> None:
         @property
         def a(self):
             return 42
-
-    A()
     """
-    node = extract_node(code)
-    # Infer the class
-    cls = next(node.infer())
+    cls = extract_node(code)
     (prop,) = cls.getattr("a")
 
-    # Try to infer the property function *multiple* times. `A.locals` should be modified only once
+    assert len(cls.locals["a"]) == 1
     for _ in range(3):
         prop.inferred()
     a_locals = cls.locals["a"]
-    # [FunctionDef, Property]
-    assert len(a_locals) == 2
+    assert len(a_locals) == 1
 
 
 def test_getattr_fails_on_empty_values() -> None:
@@ -7363,3 +7377,41 @@ def test_sys_argv_uninferable() -> None:
     sys_argv_value = list(a._infer())
     assert len(sys_argv_value) == 1
     assert sys_argv_value[0] is Uninferable
+
+
+def test_empty_format_spec() -> None:
+    """Regression test for https://github.com/pylint-dev/pylint/issues/9945."""
+    node = extract_node('f"{x:}"')
+    assert isinstance(node, nodes.JoinedStr)
+
+    assert list(node.infer()) == [util.Uninferable]
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [
+        (
+            """
+class Cls:
+    # pylint: disable=too-few-public-methods
+    pass
+
+c_obj = Cls()
+
+s1 = f'{c_obj!r}' #@
+""",
+            "<__main__.Cls",
+        ),
+        ("s1 = f'{5}' #@", "5"),
+    ],
+)
+def test_joined_str_returns_string(source, expected) -> None:
+    """Regression test for https://github.com/pylint-dev/pylint/issues/9947."""
+    node = extract_node(source)
+    assert isinstance(node, Assign)
+    target = node.targets[0]
+    assert target
+    inferred = list(target.inferred())
+    assert len(inferred) == 1
+    assert isinstance(inferred[0], Const)
+    inferred[0].value.startswith(expected)

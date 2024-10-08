@@ -42,7 +42,7 @@ if TYPE_CHECKING:
             InferenceContext,
             InferenceContext,
         ],
-        list[partial[Generator[InferenceResult, None, None]]],
+        list[partial[Generator[InferenceResult]]],
     ]
 
 
@@ -603,6 +603,7 @@ class OperatorNode(NodeNG):
                 ),
             ]
 
+        # pylint: disable = too-many-boolean-expressions
         if (
             PY310_PLUS
             and op == "|"

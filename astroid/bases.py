@@ -147,7 +147,7 @@ def _infer_stmts(
     stmts: Iterable[InferenceResult],
     context: InferenceContext | None,
     frame: nodes.NodeNG | BaseInstance | None = None,
-) -> collections.abc.Generator[InferenceResult, None, None]:
+) -> collections.abc.Generator[InferenceResult]:
     """Return an iterator on statements inferred by each statement in *stmts*."""
     inferred = False
     constraint_failed = False
@@ -354,7 +354,7 @@ class Instance(BaseInstance):
         other: InferenceResult,
         context: InferenceContext,
         method: SuccessfulInferenceResult,
-    ) -> Generator[InferenceResult, None, None]:
+    ) -> Generator[InferenceResult]:
         return method.infer_call_result(self, context)
 
     def __repr__(self) -> str:
@@ -491,9 +491,7 @@ class UnboundMethod(Proxy):
         self,
         caller: SuccessfulInferenceResult | None,
         context: InferenceContext,
-    ) -> collections.abc.Generator[
-        nodes.Const | Instance | UninferableBase, None, None
-    ]:
+    ) -> collections.abc.Generator[nodes.Const | Instance | UninferableBase]:
         if not isinstance(caller, nodes.Call):
             return
         if not caller.args:
@@ -681,7 +679,7 @@ class Generator(BaseInstance):
     # We defer initialization of special_attributes to the __init__ method since the constructor
     # of GeneratorModel requires the raw_building to be complete
     # TODO: This should probably be refactored.
-    special_attributes: objectmodel.GeneratorModel
+    special_attributes: objectmodel.GeneratorBaseModel
 
     def __init__(
         self,
@@ -719,6 +717,10 @@ class Generator(BaseInstance):
 
 class AsyncGenerator(Generator):
     """Special node representing an async generator."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        AsyncGenerator.special_attributes = objectmodel.AsyncGeneratorModel()
 
     def pytype(self) -> Literal["builtins.async_generator"]:
         return "builtins.async_generator"

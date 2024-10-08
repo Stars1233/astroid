@@ -116,6 +116,10 @@ class AstroidManager:
         return self.astroid_cache["builtins"]
 
     @property
+    def synthetic_root(self) -> nodes.Module:
+        return self.astroid_cache["__astroid_synthetic"]
+
+    @property
     def prefer_stubs(self) -> bool:
         return AstroidManager.brain["prefer_stubs"]
 
@@ -465,6 +469,8 @@ class AstroidManager:
         _invalidate_cache()  # inference context cache
 
         self.astroid_cache.clear()
+        self._mod_file_cache.clear()
+
         # NB: not a new TransformVisitor()
         AstroidManager.brain["_transform"].transforms = collections.defaultdict(list)
 

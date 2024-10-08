@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import ast
 import os
+import re
 import textwrap
 import types
 import warnings
@@ -33,7 +34,6 @@ _TRANSIENT_FUNCTION = "__"
 # The comment used to select a statement to be extracted
 # when calling extract_node.
 _STATEMENT_SELECTOR = "#@"
-MISPLACED_TYPE_ANNOTATION_ERROR = "misplaced type annotation"
 
 if PY312_PLUS:
     warnings.filterwarnings("ignore", "invalid escape sequence", SyntaxWarning)
@@ -233,7 +233,7 @@ class AstroidBuilder(raw_building.InspectBuilder):
                 sort_locals(node.parent.scope().locals[asname or name])  # type: ignore[arg-type]
 
     def delayed_assattr(self, node: nodes.AssignAttr) -> None:
-        """Visit a AssAttr node.
+        """Visit an AssignAttr node.
 
         This adds name to locals and handle members definition.
         """
@@ -244,8 +244,7 @@ class AstroidBuilder(raw_building.InspectBuilder):
                 if isinstance(inferred, util.UninferableBase):
                     continue
                 try:
-                    # pylint: disable=unidiomatic-typecheck # We want a narrow check on the
-                    # parent type, not all of its subclasses
+                    # We want a narrow check on the parent type, not all of its subclasses
                     if type(inferred) in {bases.Instance, objects.ExceptionInstance}:
                         inferred = inferred._proxied
                         iattrs = inferred.instance_attrs
@@ -479,9 +478,11 @@ def _parse_string(
         )
     except SyntaxError as exc:
         # If the type annotations are misplaced for some reason, we do not want
-        # to fail the entire parsing of the file, so we need to retry the parsing without
-        # type comment support.
-        if exc.args[0] != MISPLACED_TYPE_ANNOTATION_ERROR or not type_comments:
+        # to fail the entire parsing of the file, so we need to retry the
+        # parsing without type comment support. We use a heuristic for
+        # determining if the error is due to type annotations.
+        type_annot_related = re.search(r"#\s+type:", exc.text or "")
+        if not (type_annot_related and type_comments):
             raise
 
         parser_module = get_parser_module(type_comments=False)

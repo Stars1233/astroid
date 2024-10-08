@@ -82,7 +82,7 @@ AssignedStmtsCall = Callable[
 ]
 InferBinaryOperation = Callable[
     [_NodesT, Optional[InferenceContext]],
-    Generator[Union[InferenceResult, _BadOpMessageT], None, None],
+    Generator[Union[InferenceResult, _BadOpMessageT]],
 ]
 InferLHS = Callable[
     [_NodesT, Optional[InferenceContext]],
@@ -737,7 +737,7 @@ class Arguments(
         self.vararg_node = vararg_node
         self.kwarg_node = kwarg_node
 
-    # pylint: disable=too-many-arguments
+    # pylint: disable=too-many-arguments, too-many-positional-arguments
     def postinit(
         self,
         args: list[AssignName] | None,
@@ -1523,7 +1523,7 @@ class BinOp(_base_nodes.OperatorNode):
         yield self.left
         yield self.right
 
-    def op_precedence(self):
+    def op_precedence(self) -> int:
         return OP_PRECEDENCE[self.op]
 
     def op_left_associative(self) -> bool:
@@ -1632,7 +1632,7 @@ class BoolOp(NodeNG):
     def get_children(self):
         yield from self.values
 
-    def op_precedence(self):
+    def op_precedence(self) -> int:
         return OP_PRECEDENCE[self.op]
 
     @decorators.raise_if_nothing_inferred
@@ -2061,7 +2061,16 @@ class Const(_base_nodes.NoChildrenNode, Instance):
         :param end_col_offset: The end column this node appears on in the
             source code. Note: This is after the last symbol.
         """
-        self.value: Any = value
+        if getattr(value, "__name__", None) == "__doc__":
+            warnings.warn(  # pragma: no cover
+                "You have most likely called a __doc__ field of some object "
+                "and it didn't return a string. "
+                "That happens to some symbols from the standard library. "
+                "Check for isinstance(<X>.__doc__, str).",
+                RuntimeWarning,
+                stacklevel=0,
+            )
+        self.value = value
         """The value that the constant represents."""
 
         self.kind: str | None = kind  # can be None
@@ -3042,7 +3051,7 @@ class If(_base_nodes.MultiLineWithElseBlockNode, _base_nodes.Statement):
         yield from self.body
         yield from self.orelse
 
-    def has_elif_block(self):
+    def has_elif_block(self) -> bool:
         return len(self.orelse) == 1 and isinstance(self.orelse[0], If)
 
     def _get_yield_nodes_skip_functions(self):
@@ -3489,7 +3498,7 @@ class Return(_base_nodes.Statement):
         if self.value is not None:
             yield self.value
 
-    def is_tuple_return(self):
+    def is_tuple_return(self) -> bool:
         return isinstance(self.value, Tuple)
 
     def _get_return_nodes_skip_functions(self):
@@ -4289,7 +4298,7 @@ class UnaryOp(_base_nodes.OperatorNode):
     def get_children(self):
         yield self.operand
 
-    def op_precedence(self):
+    def op_precedence(self) -> int:
         if self.op == "not":
             return OP_PRECEDENCE[self.op]
 
@@ -4676,32 +4685,30 @@ class FormattedValue(NodeNG):
     def _infer(
         self, context: InferenceContext | None = None, **kwargs: Any
     ) -> Generator[InferenceResult, None, InferenceErrorInfo | None]:
-        if self.format_spec is None:
-            yield from self.value.infer(context, **kwargs)
-            return
+        format_specs = Const("") if self.format_spec is None else self.format_spec
         uninferable_already_generated = False
-        for format_spec in self.format_spec.infer(context, **kwargs):
+        for format_spec in format_specs.infer(context, **kwargs):
             if not isinstance(format_spec, Const):
                 if not uninferable_already_generated:
                     yield util.Uninferable
                     uninferable_already_generated = True
                 continue
             for value in self.value.infer(context, **kwargs):
+                value_to_format = value
                 if isinstance(value, Const):
-                    try:
-                        formatted = format(value.value, format_spec.value)
-                        yield Const(
-                            formatted,
-                            lineno=self.lineno,
-                            col_offset=self.col_offset,
-                            end_lineno=self.end_lineno,
-                            end_col_offset=self.end_col_offset,
-                        )
-                        continue
-                    except (ValueError, TypeError):
-                        # happens when format_spec.value is invalid
-                        pass  # fall through
-                if not uninferable_already_generated:
+                    value_to_format = value.value
+                try:
+                    formatted = format(value_to_format, format_spec.value)
+                    yield Const(
+                        formatted,
+                        lineno=self.lineno,
+                        col_offset=self.col_offset,
+                        end_lineno=self.end_lineno,
+                        end_col_offset=self.end_col_offset,
+                    )
+                    continue
+                except (ValueError, TypeError):
+                    # happens when format_spec.value is invalid
                     yield util.Uninferable
                     uninferable_already_generated = True
                 continue
@@ -4779,6 +4786,9 @@ class JoinedStr(NodeNG):
     def _infer_from_values(
         cls, nodes: list[NodeNG], context: InferenceContext | None = None, **kwargs: Any
     ) -> Generator[InferenceResult, None, InferenceErrorInfo | None]:
+        if not nodes:
+            yield
+            return
         if len(nodes) == 1:
             yield from nodes[0]._infer(context, **kwargs)
             return
